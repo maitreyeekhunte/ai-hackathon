@@ -101,3 +101,23 @@ class TransactionSplit(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
 
 
+class Budget(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    period_type: str  # 'monthly' or 'custom'
+    month: Optional[str] = None  # YYYY-MM (for monthly budgets)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    total_budget: Optional[float] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    __table_args__ = {"extend_existing": True}
+
+
+class CategoryBudget(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    budget_id: int = Field(foreign_key="budget.id")
+    category: str
+    amount: float
+    __table_args__ = {"extend_existing": True}
+
+

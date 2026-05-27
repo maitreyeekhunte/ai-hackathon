@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from .models import (
     Expense, Attachment, RecurringTransaction, LinkedAccount, TransactionSplit,
     Category, CategoryRule, MerchantMapping, CategoryFeedback,
+    Budget, CategoryBudget,
 )
 from .crud import (
     create_expense, get_expenses_by_date_range, bulk_create_expenses,
@@ -651,3 +652,242 @@ def auto_categorise(body: AutoCategoriseRequest, session: Session = Depends(get_
     """Categorise a transaction without creating it — useful for previewing the AI result."""
     category = categorize_transaction(session, body.description, body.merchant, body.amount)
     return {"category": category}
+
+
+# ===== BUDGET & INSIGHTS ENDPOINTS =====
+
+class CategoryBudgetInput(BaseModel):
+    category: str
+    amount: float
+
+
+class BudgetCreateRequest(BaseModel):
+    name: str
+    period_type: str  # 'monthly' or 'custom'
+    month: Optional[str] = None  # YYYY-MM
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    total_budget: Optional[float] = None
+    category_budgets: List[CategoryBudgetInput] = []
+
+
+def _budget_date_range(budget: Budget):
+    if budget.period_type == 'monthly' and budget.month:
+        dt = datetime.strptime(budget.month, "%Y-%m")
+        start = date(dt.year, dt.month, 1)
+        last_day = calendar.monthrange(dt.year, dt.month)[1]
+        end = date(dt.year, dt.month, last_day)
+        return start, end
+    elif budget.period_type == 'custom' and budget.start_date and budget.end_date:
+        return budget.start_date, budget.end_date
+    else:
+        today = date.today()
+        return date(today.year, today.month, 1), today
+
+
+@app.post("/budgets")
+def create_budget(body: BudgetCreateRequest, session: Session = Depends(get_session)):
+    budget = Budget(
+        name=body.name,
+        period_type=body.period_type,
+        month=body.month if body.period_type == 'monthly' else None,
+        start_date=body.start_date if body.period_type == 'custom' else None,
+        end_date=body.end_date if body.period_type == 'custom' else None,
+        total_budget=body.total_budget if body.total_budget else None,
+    )
+    session.add(budget)
+    session.flush()
+
+    for cb in body.category_budgets:
+        if cb.amount > 0:
+            session.add(CategoryBudget(budget_id=budget.id, category=cb.category, amount=cb.amount))
+
+    session.commit()
+    session.refresh(budget)
+    cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget.id)).all()
+    return {"budget": budget, "category_budgets": cat_budgets}
+
+
+@app.get("/budgets")
+def list_budgets(session: Session = Depends(get_session)):
+    budgets = session.exec(select(Budget).order_by(Budget.created_at.desc())).all()
+    result = []
+    for b in budgets:
+        cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == b.id)).all()
+        result.append({"budget": b, "category_budgets": cat_budgets})
+    return result
+
+
+@app.put("/budgets/{budget_id}")
+def update_budget(budget_id: int, body: BudgetCreateRequest, session: Session = Depends(get_session)):
+    budget = session.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    budget.name = body.name
+    budget.period_type = body.period_type
+    budget.month = body.month if body.period_type == 'monthly' else None
+    budget.start_date = body.start_date if body.period_type == 'custom' else None
+    budget.end_date = body.end_date if body.period_type == 'custom' else None
+    budget.total_budget = body.total_budget if body.total_budget else None
+    session.add(budget)
+
+    # Replace category budgets
+    old_cats = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
+    for cb in old_cats:
+        session.delete(cb)
+    session.flush()
+
+    for cb in body.category_budgets:
+        if cb.amount > 0:
+            session.add(CategoryBudget(budget_id=budget_id, category=cb.category, amount=cb.amount))
+
+    session.commit()
+    session.refresh(budget)
+    cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
+    return {"budget": budget, "category_budgets": cat_budgets}
+
+
+@app.delete("/budgets/{budget_id}")
+def delete_budget(budget_id: int, session: Session = Depends(get_session)):
+    budget = session.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
+    for cb in cat_budgets:
+        session.delete(cb)
+    session.delete(budget)
+    session.commit()
+    return {"detail": "Budget deleted"}
+
+
+@app.get("/budgets/{budget_id}/analysis")
+def get_budget_analysis(budget_id: int, session: Session = Depends(get_session)):
+    budget = session.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    start, end = _budget_date_range(budget)
+    expenses = get_expenses_by_date_range(session, start, end)
+
+    # Only include expenses (not income/refunds) — positive amounts
+    expenses = [e for e in expenses if e.amount > 0 and e.category not in ('Income', 'Transfers')]
+
+    total_actual = sum(e.amount for e in expenses)
+
+    # Per-category actuals
+    cat_actuals: dict = {}
+    for e in expenses:
+        cat_actuals[e.category] = cat_actuals.get(e.category, 0.0) + e.amount
+
+    cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
+    budgeted_cats = {cb.category: cb.amount for cb in cat_budgets}
+
+    def status(actual, budgeted):
+        if budgeted is None or budgeted == 0:
+            return "none"
+        pct = (actual / budgeted) * 100
+        if pct >= 100:
+            return "red"
+        elif pct >= 80:
+            return "yellow"
+        return "green"
+
+    # Categories with a budget set
+    category_analysis = []
+    for cb in cat_budgets:
+        actual = cat_actuals.get(cb.category, 0.0)
+        pct = round((actual / cb.amount) * 100, 1) if cb.amount > 0 else 0
+        category_analysis.append({
+            "category": cb.category,
+            "budgeted": cb.amount,
+            "actual": round(actual, 2),
+            "percentage": pct,
+            "status": status(actual, cb.amount),
+        })
+
+    # Categories with spending but no budget
+    unbudgeted = [
+        {"category": cat, "actual": round(amt, 2)}
+        for cat, amt in sorted(cat_actuals.items(), key=lambda x: -x[1])
+        if cat not in budgeted_cats
+    ]
+
+    total_pct = round((total_actual / budget.total_budget) * 100, 1) if budget.total_budget else None
+
+    return {
+        "budget": budget,
+        "period": {"start": str(start), "end": str(end)},
+        "total": {
+            "budgeted": budget.total_budget,
+            "actual": round(total_actual, 2),
+            "percentage": total_pct,
+            "status": status(total_actual, budget.total_budget),
+        },
+        "category_analysis": category_analysis,
+        "unbudgeted_categories": unbudgeted,
+    }
+
+
+@app.post("/budgets/{budget_id}/ai-summary")
+def get_budget_ai_summary(budget_id: int, session: Session = Depends(get_session)):
+    budget = session.get(Budget, budget_id)
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    start, end = _budget_date_range(budget)
+    expenses = get_expenses_by_date_range(session, start, end)
+    expenses = [e for e in expenses if e.amount > 0 and e.category not in ('Income', 'Transfers')]
+
+    cat_totals: dict = {}
+    for e in expenses:
+        cat_totals[e.category] = cat_totals.get(e.category, 0.0) + e.amount
+
+    cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
+    budgeted_cats = {cb.category: cb.amount for cb in cat_budgets}
+
+    total_actual = sum(cat_totals.values())
+
+    summary_data = {
+        "period": f"{start} to {end}",
+        "total_budget": budget.total_budget,
+        "total_spent": round(total_actual, 2),
+        "category_breakdown": [
+            {
+                "category": cat,
+                "spent": round(amt, 2),
+                "budgeted": budgeted_cats.get(cat),
+            }
+            for cat, amt in sorted(cat_totals.items(), key=lambda x: -x[1])
+        ]
+    }
+
+    import json
+    import openai
+
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    prompt = f"""You are a personal finance advisor analyzing expense data for an Indian user.
+
+Here is the spending summary for the period {start} to {end}:
+
+{json.dumps(summary_data, indent=2)}
+
+Provide a concise, actionable analysis with:
+1. Overall spending health assessment (1-2 sentences)
+2. Top 3 areas where spending can be reduced (specific, practical tips for Indian context — mention apps, alternatives, habits)
+3. One positive observation if applicable
+
+Be direct, friendly, and specific. Use Indian Rupee (₹) symbol. Keep it under 200 words."""
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.7,
+        )
+        summary_text = resp.choices[0].message.content.strip()
+    except Exception as e:
+        summary_text = f"AI summary unavailable: {str(e)}"
+
+    return {"summary": summary_text, "data": summary_data}
