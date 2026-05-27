@@ -6,10 +6,12 @@ export default function CsvUpload({ onUpload, isLoading }) {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
     if (file) {
-      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+      const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
+      const isPDF = file.type === 'application/pdf' || file.name.endsWith('.pdf')
+      if (isCSV || isPDF) {
         setSelectedFile(file)
       } else {
-        alert('Please select a valid CSV file')
+        alert('Please select a CSV or PDF file')
         e.target.value = ''
       }
     }
@@ -29,18 +31,18 @@ export default function CsvUpload({ onUpload, isLoading }) {
   return (
     <form className="form-section active" onSubmit={handleSubmit}>
       <p style={{ marginBottom: '15px', color: '#666', fontSize: '14px' }}>
-        Upload a CSV file with columns: description, category, amount, date
+        Upload a bank statement — CSV (columns: description, category, amount, date) or PDF
       </p>
 
       <div className="file-input-wrapper">
         <label htmlFor="csv-input" className="file-label">
-          Choose CSV File
+          Choose CSV or PDF File
         </label>
         <input
           id="csv-input"
           type="file"
           className="file-input"
-          accept=".csv"
+          accept=".csv,.pdf"
           onChange={handleFileChange}
           disabled={isLoading}
         />
@@ -52,7 +54,7 @@ export default function CsvUpload({ onUpload, isLoading }) {
       </div>
 
       <button type="submit" disabled={isLoading || !selectedFile}>
-        {isLoading ? <span className="loading-spinner"></span> : 'Upload CSV'}
+        {isLoading ? <span className="loading-spinner"></span> : 'Upload Statement'}
       </button>
     </form>
   )

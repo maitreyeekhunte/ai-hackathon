@@ -22,3 +22,5 @@ uvicorn app.main:app --reload
 ```
 
 3. Open docs at http://127.0.0.1:8000/docs
+
+4. Run this command for running the backend - python3 -m uvicorn app.main:app --reload

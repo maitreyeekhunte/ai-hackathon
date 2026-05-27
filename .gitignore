@@ -5,3 +5,4 @@ expenses.db
 *.sqlite
 env/
 venv/
+.env
