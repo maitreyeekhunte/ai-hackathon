@@ -3,28 +3,43 @@ import React, { useState, useEffect } from 'react'
 export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCancel }) {
   const [formData, setFormData] = useState({
     description: '',
-    category: 'food',
+    category: 'Food & Dining',
     amount: '',
     date: new Date().toISOString().split('T')[0],
     merchant: '',
     notes: '',
-    is_recurring: false
+    is_recurring: false,
+    recurring_frequency: 'monthly'
   })
-  
-  const [showOCR, setShowOCR] = useState(false)
 
-  const categories = ['food', 'transport', 'entertainment', 'utilities', 'shopping', 'health', 'other']
+  const categories = [
+    'Food & Dining',
+    'Transportation',
+    'Shopping',
+    'Entertainment',
+    'Bills & Utilities',
+    'Healthcare',
+    'Travel',
+    'Education',
+    'Personal Care',
+    'Home',
+    'Investments & Savings',
+    'Income',
+    'Transfers',
+    'Other',
+  ]
 
   useEffect(() => {
     if (editingExpense) {
       setFormData({
         description: editingExpense.description || '',
-        category: editingExpense.category || 'food',
+        category: editingExpense.category || 'Food & Dining',
         amount: editingExpense.amount || '',
         date: editingExpense.date || new Date().toISOString().split('T')[0],
         merchant: editingExpense.merchant || '',
         notes: editingExpense.notes || '',
-        is_recurring: editingExpense.is_recurring || false
+        is_recurring: editingExpense.is_recurring || false,
+        recurring_frequency: editingExpense.recurring_frequency || 'monthly'
       })
     }
   }, [editingExpense])
@@ -47,44 +62,14 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
     if (!editingExpense) {
       setFormData({
         description: '',
-        category: 'food',
+        category: 'Food & Dining',
         amount: '',
         date: new Date().toISOString().split('T')[0],
         merchant: '',
         notes: '',
-        is_recurring: false
+        is_recurring: false,
+        recurring_frequency: 'monthly'
       })
-    }
-  }
-
-  const handleReceiptScan = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const formDataForUpload = new FormData()
-    formDataForUpload.append('file', file)
-
-    try {
-      const response = await fetch('http://localhost:8000/expenses/receipt-scan', {
-        method: 'POST',
-        body: formDataForUpload
-      })
-
-      if (response.ok) {
-        const result = await response.json()
-        alert('Receipt scanned successfully! Update the fields as needed.')
-        setFormData(prev => ({
-          ...prev,
-          merchant: result.merchant,
-          amount: result.amount,
-          date: result.date
-        }))
-        setShowOCR(false)
-      } else {
-        alert('Failed to scan receipt. Make sure pytesseract and Tesseract OCR are installed.')
-      }
-    } catch (error) {
-      alert(`Error: ${error.message}`)
     }
   }
 
@@ -126,15 +111,13 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
           disabled={isLoading}
         >
           {categories.map(cat => (
-            <option key={cat} value={cat}>
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
-            </option>
+            <option key={cat} value={cat}>{cat}</option>
           ))}
         </select>
       </div>
 
       <div className="form-group">
-        <label htmlFor="amount">Amount *</label>
+        <label htmlFor="amount">Amount * <span style={{ fontWeight: 'normal', color: '#666' }}>(In INR)</span></label>
         <input
           id="amount"
           type="number"
@@ -142,7 +125,7 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
           step="0.01"
           value={formData.amount}
           onChange={handleChange}
-          placeholder="0.00"
+          placeholder="Enter amount in INR"
           disabled={isLoading}
         />
       </div>
@@ -184,25 +167,23 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
         </label>
       </div>
 
-      <div className="form-group">
-        <details>
-          <summary style={{ cursor: 'pointer', color: '#667eea', fontWeight: '600' }}>
-            📷 Scan Receipt (Optional)
-          </summary>
-          <div style={{ marginTop: '10px' }}>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleReceiptScan}
-              disabled={isLoading}
-              style={{ marginTop: '10px' }}
-            />
-            <p style={{ fontSize: '12px', color: '#999', marginTop: '5px' }}>
-              Upload a receipt photo to auto-extract merchant, amount, and date (requires OCR libraries)
-            </p>
-          </div>
-        </details>
-      </div>
+      {formData.is_recurring && (
+        <div className="form-group">
+          <label htmlFor="recurring_frequency">Frequency</label>
+          <select
+            id="recurring_frequency"
+            name="recurring_frequency"
+            value={formData.recurring_frequency}
+            onChange={handleChange}
+            disabled={isLoading}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+      )}
 
       <div className="button-group">
         <button type="submit" disabled={isLoading}>

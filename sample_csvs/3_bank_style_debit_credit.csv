@@ -1,0 +1,11 @@
+Transaction Date,Narration,Debit (INR),Credit (INR),Recurring,Frequency
+01-May-2026,UPI Transfer to Zomato,450.00,,no,
+02-May-2026,Salary Credit,,75000.00,no,
+03-May-2026,Electricity Bill Payment,2150.00,,yes,monthly
+04-May-2026,ATM Cash Withdrawal,5000.00,,no,
+05-May-2026,Online Shopping - Amazon,3499.00,,no,
+06-May-2026,Interest Credit,,500.00,no,
+07-May-2026,Fuel Payment - Shell Petrol,2300.00,,no,
+08-May-2026,Netflix Subscription,499.00,,yes,monthly
+09-May-2026,Refund Credit - Myntra,,1500.00,no,
+10-May-2026,Insurance Premium,9512.00,,yes,yearly

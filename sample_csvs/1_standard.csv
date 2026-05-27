@@ -1,0 +1,11 @@
+date,description,amount,category,recurring,frequency
+2026-05-01,Zomato food order,450,Food & Dining,no,
+2026-05-02,Uber ride to office,220,Transportation,no,
+2026-05-03,Netflix subscription,499,Entertainment,yes,monthly
+2026-05-04,Electricity bill payment,2150,Bills & Utilities,yes,monthly
+2026-05-05,Amazon grocery order,1380,Shopping,no,
+2026-05-06,Apollo Pharmacy medicines,890,Healthcare,no,
+2026-05-07,Starbucks coffee,380,Food & Dining,no,
+2026-05-08,Reliance Jio recharge,299,Bills & Utilities,yes,monthly
+2026-05-09,Gym membership,1500,Personal Care,yes,monthly
+2026-05-10,Swiggy dinner,650,Food & Dining,no,

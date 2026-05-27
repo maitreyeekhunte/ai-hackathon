@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import ExpenseForm from './components/ExpenseForm'
 import ExpenseList from './components/ExpenseList'
 import CsvUpload from './components/CsvUpload'
-import LinkedAccounts from './components/LinkedAccounts'
 import RecurringTransactions from './components/RecurringTransactions'
 
 export default function App() {
@@ -41,9 +40,7 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    fetchExpenses()
-  }, [])
+  // no auto-fetch on mount — user must apply a filter in View Expenses
 
   const handleAddExpense = async (expenseData) => {
     try {
@@ -131,6 +128,21 @@ export default function App() {
     }
   }
 
+  const handleDeleteAll = async () => {
+    if (!confirm(`Delete all ${expenses.length} expenses? This cannot be undone.`)) return
+    try {
+      setLoading(true)
+      await Promise.all(expenses.map(e => fetch(`${API_URL}/expenses/${e.id}`, { method: 'DELETE' })))
+      setExpenses([])
+      setMessage({ type: 'success', text: 'All expenses deleted.' })
+      setTimeout(() => setMessage(null), 3000)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Error: ${error.message}` })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters)
     fetchExpenses(newFilters)
@@ -138,7 +150,7 @@ export default function App() {
 
   return (
     <div className="container">
-      <h1>💰 Expense Tracker</h1>
+      <h1>✨ AI Powered Expense Tracker</h1>
 
       {message && (
         <div className={`message ${message.type}`}>
@@ -157,7 +169,7 @@ export default function App() {
           className={`tab-btn ${activeTab === 'upload' ? 'active' : ''}`}
           onClick={() => setActiveTab('upload')}
         >
-          Upload CSV
+          Upload Statement
         </button>
         <button 
           className={`tab-btn ${activeTab === 'list' ? 'active' : ''}`}
@@ -169,13 +181,7 @@ export default function App() {
           className={`tab-btn ${activeTab === 'recurring' ? 'active' : ''}`}
           onClick={() => setActiveTab('recurring')}
         >
-          Recurring
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'accounts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('accounts')}
-        >
-          Accounts
+          Recurring Expenses
         </button>
       </div>
 
@@ -193,12 +199,13 @@ export default function App() {
       )}
 
       {activeTab === 'list' && (
-        <ExpenseList 
-          expenses={expenses} 
+        <ExpenseList
+          expenses={expenses}
           isLoading={loading}
           onFilterChange={handleFilterChange}
           onEdit={handleEditExpense}
           onDelete={handleDeleteExpense}
+          onDeleteAll={handleDeleteAll}
         />
       )}
 
@@ -206,9 +213,6 @@ export default function App() {
         <RecurringTransactions isLoading={loading} />
       )}
 
-      {activeTab === 'accounts' && (
-        <LinkedAccounts isLoading={loading} />
-      )}
     </div>
   )
 }

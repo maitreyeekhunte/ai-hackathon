@@ -1,0 +1,12 @@
+date,description,merchant,amount,recurring,frequency
+2026-05-01,Ordered biryani for dinner,Zomato,520,no,
+2026-05-02,Monthly gym fees,Cult Fit,1200,yes,monthly
+2026-05-03,Cab to airport,Ola,850,no,
+2026-05-04,Paid water bill,BWSSB,430,yes,monthly
+2026-05-05,Bought headphones,Amazon,2999,no,
+2026-05-06,Movie tickets for weekend,PVR Cinemas,700,no,
+2026-05-07,Dentist visit,Apollo Dental,1500,no,
+2026-05-08,Petrol fill-up,Indian Oil,2200,no,
+2026-05-09,Annual domain renewal,GoDaddy,799,yes,yearly
+2026-05-10,House rent payment,Owner Transfer,18000,yes,monthly,
+2026-05-11,Trip to Gangtok,MakeMyTrip,10000,no,

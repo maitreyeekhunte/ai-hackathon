@@ -3,6 +3,44 @@ from typing import Optional
 from datetime import date, datetime
 
 
+class Category(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    parent_id: Optional[int] = Field(default=None, foreign_key="category.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    __table_args__ = {"extend_existing": True}
+
+
+class CategoryRule(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    keyword: str
+    category: str
+    priority: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    __table_args__ = {"extend_existing": True}
+
+
+class MerchantMapping(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    merchant: str
+    category: str
+    source: str = Field(default="global")  # 'global', 'user', 'ai'
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    __table_args__ = {"extend_existing": True}
+
+
+class CategoryFeedback(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    expense_id: int = Field(foreign_key="expense.id")
+    old_category: str
+    new_category: str
+    merchant: Optional[str] = None
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    __table_args__ = {"extend_existing": True}
+
+
 class Expense(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     description: str
@@ -12,6 +50,7 @@ class Expense(SQLModel, table=True):
     merchant: Optional[str] = None
     notes: Optional[str] = None
     is_recurring: bool = False
+    recurring_frequency: Optional[str] = Field(default=None)  # 'daily','weekly','monthly','yearly'
     recurring_id: Optional[int] = Field(default=None, foreign_key="recurringtransaction.id")
     parent_transaction_id: Optional[int] = Field(default=None, foreign_key="expense.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)

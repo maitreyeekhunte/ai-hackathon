@@ -1,0 +1,11 @@
+frequency,recurring,category,amount,description,date
+monthly,yes,Shopping,3499,Amazon online purchase,03-May-2026
+,no,Food & Dining,1875,Restaurant dinner,04-May-2026
+monthly,yes,Bills & Utilities,799,Mobile recharge,05-May-2026
+,no,Transportation,2300,Shell petrol fill,06-May-2026
+monthly,yes,Investments & Savings,10000,Mutual Fund SIP,07-May-2026
+,no,Entertainment,500,BookMyShow movie tickets,08-May-2026
+,no,Food & Dining,1250,Big Bazaar groceries,09-May-2026
+yearly,yes,Bills & Utilities,9512,Insurance premium payment,10-May-2026
+,no,Healthcare,4500,Doctor consultation fee,11-May-2026
+,no,Shopping,2670,Myntra clothing order,12-May-2026
