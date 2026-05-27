@@ -6,8 +6,41 @@ function formatINR(amount) {
   return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+const CATEGORIES = [
+  'Food & Dining', 'Transportation', 'Shopping', 'Entertainment',
+  'Bills & Utilities', 'Healthcare', 'Travel', 'Education',
+  'Personal Care', 'Home', 'Investments & Savings', 'Income', 'Transfers', 'Other',
+]
+
+const CAT_COLORS = {
+  'Food & Dining':        '#F59E0B',
+  'Transportation':       '#3B82F6',
+  'Shopping':             '#EC4899',
+  'Entertainment':        '#8B5CF6',
+  'Bills & Utilities':    '#EF4444',
+  'Healthcare':           '#10B981',
+  'Travel':               '#06B6D4',
+  'Education':            '#F97316',
+  'Personal Care':        '#D946EF',
+  'Home':                 '#84CC16',
+  'Investments & Savings':'#22C55E',
+  'Income':               '#10B981',
+  'Transfers':            '#64748B',
+  'Other':                '#94A3B8',
+}
+
+function CategoryPill({ category }) {
+  const color = CAT_COLORS[category] || '#94A3B8'
+  return (
+    <span className="category-pill" style={{ background: color + '18', color }}>
+      <span className="cat-dot" style={{ background: color }} />
+      {category}
+    </span>
+  )
+}
+
 export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdit, onDelete, onDeleteAll }) {
-  const [mode, setMode] = useState('month')       // 'month' | 'range'
+  const [mode, setMode] = useState('month')
   const [monthVal, setMonthVal] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -15,294 +48,201 @@ export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdi
   const [hasApplied, setHasApplied] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('all')
 
-  const CATEGORIES = [
-    'Food & Dining', 'Transportation', 'Shopping', 'Entertainment',
-    'Bills & Utilities', 'Healthcare', 'Travel', 'Education',
-    'Personal Care', 'Home', 'Investments & Savings', 'Income', 'Transfers', 'Other',
-  ]
-
-  const switchMode = (newMode) => {
-    setMode(newMode)
-    setError('')
-    setMonthVal('')
-    setStartDate('')
-    setEndDate('')
-  }
+  const switchMode = (m) => { setMode(m); setError(''); setMonthVal(''); setStartDate(''); setEndDate('') }
 
   const handleApply = () => {
     setError('')
-
     if (mode === 'month') {
-      if (!monthVal) {
-        setError('Please select a month before applying.')
-        return
-      }
+      if (!monthVal) { setError('Please select a month.'); return }
       setHasApplied(true)
       onFilterChange({ month: monthVal, startDate: '', endDate: '' })
-
     } else {
-      if (!startDate || !endDate) {
-        setError('Both start date and end date are required.')
-        return
-      }
-      if (startDate > TODAY) {
-        setError('Start date must be today or in the past.')
-        return
-      }
-      if (endDate > TODAY) {
-        setError('End date must be today or in the past.')
-        return
-      }
-      if (startDate > endDate) {
-        setError('Start date must be before or equal to end date.')
-        return
-      }
+      if (!startDate || !endDate) { setError('Start and end date are required.'); return }
+      if (startDate > TODAY) { setError('Start date must be today or in the past.'); return }
+      if (endDate > TODAY)   { setError('End date must be today or in the past.'); return }
+      if (startDate > endDate) { setError('Start date must be before end date.'); return }
       setHasApplied(true)
       onFilterChange({ month: '', startDate, endDate })
     }
   }
 
-  const filtered = categoryFilter === 'all'
-    ? expenses
-    : expenses.filter(e => e.category === categoryFilter)
-
-  const totalAmount = filtered.reduce((sum, exp) => sum + exp.amount, 0)
+  const filtered = categoryFilter === 'all' ? expenses : expenses.filter(e => e.category === categoryFilter)
+  const totalAmount = filtered.reduce((sum, e) => sum + e.amount, 0)
   const avgAmount = filtered.length > 0 ? totalAmount / filtered.length : 0
 
   return (
-    <div className="expenses-container active">
-
-      {/* ── Header row: mode toggle + Delete All ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          type="button"
-          onClick={() => switchMode('month')}
-          style={{
-            padding: '8px 20px',
-            borderRadius: '20px',
-            border: '2px solid #667eea',
-            background: mode === 'month' ? '#667eea' : 'white',
-            color: mode === 'month' ? 'white' : '#667eea',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '14px',
-          }}
-        >
-          By Month
-        </button>
-        <button
-          type="button"
-          onClick={() => switchMode('range')}
-          style={{
-            padding: '8px 20px',
-            borderRadius: '20px',
-            border: '2px solid #667eea',
-            background: mode === 'range' ? '#667eea' : 'white',
-            color: mode === 'range' ? 'white' : '#667eea',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '14px',
-          }}
-        >
-          By Date Range
-        </button>
+    <div>
+      {/* ── Filter Bar ── */}
+      <div className="filter-bar">
+        {/* Mode pills */}
+        <div className="filter-group" style={{ gap: 6 }}>
+          <label>Period</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['month', 'range'].map(m => (
+              <button
+                key={m}
+                className={`pill ${mode === m ? 'active' : ''}`}
+                onClick={() => switchMode(m)}
+                type="button"
+              >
+                {m === 'month' ? 'By Month' : 'Date Range'}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {expenses.length > 0 && (
-          <button
-            type="button"
-            onClick={onDeleteAll}
-            disabled={isLoading}
-            style={{
-              padding: '8px 18px',
-              background: 'white',
-              color: '#e53e3e',
-              border: '2px solid #e53e3e',
-              borderRadius: '6px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '13px',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            🗑️ Delete All
-          </button>
-        )}
-      </div>
-
-      {/* ── Filter inputs ── */}
-      <div className="filter-section" style={{ alignItems: 'flex-end' }}>
+        {/* Date inputs */}
         {mode === 'month' ? (
           <div className="filter-group">
-            <label htmlFor="month">Select Month</label>
+            <label>Month</label>
             <input
-              id="month"
               type="month"
               value={monthVal}
               max={TODAY.slice(0, 7)}
               onChange={e => { setMonthVal(e.target.value); setError('') }}
               disabled={isLoading}
+              style={{ width: 160 }}
             />
           </div>
         ) : (
           <>
             <div className="filter-group">
-              <label htmlFor="startDate">Start Date <span style={{ color: '#e53e3e' }}>*</span></label>
-              <input
-                id="startDate"
-                type="date"
-                value={startDate}
-                max={TODAY}
-                onChange={e => { setStartDate(e.target.value); setError('') }}
-                disabled={isLoading}
-              />
+              <label>Start Date</label>
+              <input type="date" value={startDate} max={TODAY} onChange={e => { setStartDate(e.target.value); setError('') }} disabled={isLoading} style={{ width: 150 }} />
             </div>
             <div className="filter-group">
-              <label htmlFor="endDate">End Date <span style={{ color: '#e53e3e' }}>*</span></label>
-              <input
-                id="endDate"
-                type="date"
-                value={endDate}
-                max={TODAY}
-                onChange={e => { setEndDate(e.target.value); setError('') }}
-                disabled={isLoading}
-              />
+              <label>End Date</label>
+              <input type="date" value={endDate} max={TODAY} onChange={e => { setEndDate(e.target.value); setError('') }} disabled={isLoading} style={{ width: 150 }} />
             </div>
           </>
         )}
 
+        {/* Category filter */}
         <div className="filter-group">
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={isLoading}
-            style={{
-              padding: '10px 28px',
-              background: '#667eea',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '14px',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {isLoading ? <span className="loading-spinner"></span> : 'Apply'}
+          <label>Category</label>
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} disabled={isLoading} style={{ width: 170 }}>
+            <option value="all">All Categories</option>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {/* Apply */}
+        <div className="filter-group" style={{ justifyContent: 'flex-end' }}>
+          <label style={{ visibility: 'hidden' }}>_</label>
+          <button type="button" className="btn btn-primary" onClick={handleApply} disabled={isLoading}>
+            {isLoading ? <><span className="spinner" /> Loading</> : 'Apply'}
           </button>
         </div>
 
-        <div className="filter-group">
-          <label htmlFor="categoryFilter">Category</label>
-          <select
-            id="categoryFilter"
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            disabled={isLoading}
-            style={{ minWidth: '160px' }}
-          >
-            <option value="all">All Categories</option>
-            {CATEGORIES.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        </div>
+        {/* Delete All */}
+        {expenses.length > 0 && (
+          <div className="filter-group" style={{ justifyContent: 'flex-end', marginLeft: 'auto' }}>
+            <label style={{ visibility: 'hidden' }}>_</label>
+            <button type="button" className="btn btn-danger" onClick={onDeleteAll} disabled={isLoading}>
+              Delete All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Validation error ── */}
       {error && (
-        <div style={{
-          background: '#fff5f5',
-          border: '1px solid #feb2b2',
-          color: '#c53030',
-          borderRadius: '6px',
-          padding: '10px 14px',
-          marginBottom: '16px',
-          fontSize: '14px',
-        }}>
-          {error}
-        </div>
+        <div className="message error" style={{ marginBottom: 16 }}>{error}</div>
       )}
 
       {/* ── Body ── */}
       {!hasApplied ? (
-        <div className="no-expenses" style={{ color: '#888', paddingTop: '40px' }}>
-          <p>Select {mode === 'month' ? 'a month' : 'a date range'} above and click <strong>Apply</strong> to view expenses.</p>
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div className="empty-state-title">Select a period to view expenses</div>
+          <div className="empty-state-desc">Choose a month or custom date range above, then click Apply.</div>
         </div>
       ) : isLoading ? (
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <span className="loading-spinner"></span>
+        <div style={{ textAlign: 'center', padding: 60 }}>
+          <span className="spinner spinner-dark" style={{ width: 28, height: 28, borderWidth: 3 }} />
         </div>
       ) : expenses.length === 0 ? (
-        <div className="no-expenses">
-          <p>No expenses found for the selected period.</p>
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </div>
+          <div className="empty-state-title">No expenses found</div>
+          <div className="empty-state-desc">No expenses recorded for the selected period.</div>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="no-expenses">
-          <p>No <strong>{categoryFilter}</strong> expenses found for the selected period.</p>
+        <div className="empty-state">
+          <div className="empty-state-title">No {categoryFilter} expenses</div>
+          <div className="empty-state-desc">Try selecting a different category filter.</div>
         </div>
       ) : (
         <>
           {/* Stats */}
-          <div className="stats">
+          <div className="stats-grid">
             <div className="stat-card">
-              <div className="stat-label">Total</div>
+              <div className="stat-label">Total Spent</div>
               <div className="stat-value">{formatINR(totalAmount)}</div>
+              {categoryFilter !== 'all' && <div className="stat-sub">{categoryFilter}</div>}
             </div>
             <div className="stat-card">
               <div className="stat-label">Average</div>
               <div className="stat-value">{formatINR(avgAmount)}</div>
+              <div className="stat-sub">per transaction</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Count</div>
+              <div className="stat-label">Transactions</div>
               <div className="stat-value">{filtered.length}</div>
+              {expenses.length !== filtered.length && (
+                <div className="stat-sub">of {expenses.length} total</div>
+              )}
             </div>
           </div>
 
-          {/* Expense rows */}
-          <div className="expenses-list">
-            {filtered.map((expense) => (
-              <div key={expense.id} className="expense-item">
-                <div className="expense-info">
-                  <div className="expense-description">
+          {/* Expense table */}
+          <div className="expenses-table">
+            <div className="expenses-table-header">
+              <div>Description</div>
+              <div>Category</div>
+              <div>Date</div>
+              <div style={{ textAlign: 'right' }}>Amount</div>
+            </div>
+            {filtered.map(expense => (
+              <div key={expense.id} className="expense-row">
+                <div>
+                  <div className="expense-desc">
                     {expense.description}
                     {expense.is_recurring && (
-                      <span style={{ marginLeft: '8px', color: '#ff9800', fontSize: '12px' }}>
-                        🔄 {expense.recurring_frequency ? expense.recurring_frequency.charAt(0).toUpperCase() + expense.recurring_frequency.slice(1) : 'Recurring'}
+                      <span className="recurring-tag">
+                        ↺ {expense.recurring_frequency || 'recurring'}
                       </span>
                     )}
                   </div>
-                  <div className="expense-meta">
-                    <span className="expense-category">{expense.category}</span>
-                    <span>{new Date(expense.date).toLocaleDateString('en-IN')}</span>
-                    {expense.merchant && <span>👤 {expense.merchant}</span>}
-                  </div>
-                  {expense.notes && (
-                    <div style={{ fontSize: '12px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
-                      📝 {expense.notes}
-                    </div>
-                  )}
+                  {expense.merchant && <div className="expense-merchant">{expense.merchant}</div>}
+                  {expense.notes && <div className="expense-merchant" style={{ fontStyle: 'italic' }}>{expense.notes}</div>}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div className="expense-amount">{formatINR(expense.amount)}</div>
+                <div>
+                  <CategoryPill category={expense.category} />
+                </div>
+                <div className="expense-date">
+                  {new Date(expense.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </div>
+                <div className="expense-amount-cell">{formatINR(expense.amount)}</div>
+
+                <div className="expense-row-actions">
                   <button
+                    className="btn btn-secondary btn-sm"
                     onClick={() => onEdit(expense)}
-                    style={{
-                      background: '#667eea', color: 'white', border: 'none',
-                      borderRadius: '3px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px',
-                    }}
+                    title="Edit"
                   >
-                    ✏️
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
                   <button
+                    className="btn btn-danger btn-sm"
                     onClick={() => onDelete(expense.id)}
-                    style={{
-                      background: '#ff6b6b', color: 'white', border: 'none',
-                      borderRadius: '3px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px',
-                    }}
+                    title="Delete"
                   >
-                    🗑️
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                   </button>
                 </div>
               </div>
