@@ -101,6 +101,17 @@ class TransactionSplit(SQLModel, table=True):
     __table_args__ = {"extend_existing": True}
 
 
+class UploadHistory(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    original_filename: str
+    file_type: str                # 'CSV' or 'PDF'
+    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    transaction_count: int = Field(default=0)
+    status: str = Field(default='success')  # 'success' or 'failure'
+    error_message: Optional[str] = Field(default=None)
+    __table_args__ = {"extend_existing": True}
+
+
 class Budget(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str

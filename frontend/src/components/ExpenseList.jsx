@@ -9,32 +9,48 @@ function formatINR(amount) {
 const CATEGORIES = [
   'Food & Dining', 'Transportation', 'Shopping', 'Entertainment',
   'Bills & Utilities', 'Healthcare', 'Travel', 'Education',
-  'Personal Care', 'Home', 'Investments & Savings', 'Income', 'Transfers', 'Other',
+  'Personal Care', 'Home', 'Transfers', 'Miscellaneous',
 ]
 
 const CAT_COLORS = {
-  'Food & Dining':        '#F59E0B',
-  'Transportation':       '#3B82F6',
-  'Shopping':             '#EC4899',
-  'Entertainment':        '#8B5CF6',
-  'Bills & Utilities':    '#EF4444',
-  'Healthcare':           '#10B981',
-  'Travel':               '#06B6D4',
-  'Education':            '#F97316',
-  'Personal Care':        '#D946EF',
-  'Home':                 '#84CC16',
-  'Investments & Savings':'#22C55E',
-  'Income':               '#10B981',
-  'Transfers':            '#64748B',
-  'Other':                '#94A3B8',
+  'Food & Dining':     '#F59E0B',
+  'Transportation':    '#3B82F6',
+  'Shopping':          '#EC4899',
+  'Entertainment':     '#8B5CF6',
+  'Bills & Utilities': '#EF4444',
+  'Healthcare':        '#10B981',
+  'Travel':            '#06B6D4',
+  'Education':         '#F97316',
+  'Personal Care':     '#D946EF',
+  'Home':              '#84CC16',
+  'Transfers':         '#64748B',
+  'Miscellaneous':     '#94A3B8',
 }
 
 function CategoryPill({ category }) {
-  const color = CAT_COLORS[category] || '#94A3B8'
+  const isPredefined = CATEGORIES.includes(category)
+  const color = CAT_COLORS[category] || '#6366F1'
+
+  if (!isPredefined) {
+    // Custom category — Miscellaneous is primary, custom name is secondary
+    const miscColor = CAT_COLORS['Miscellaneous']
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span className="category-pill" style={{ background: miscColor + '18', color: miscColor }}>
+          <span className="cat-dot" style={{ background: miscColor, flexShrink: 0 }} />
+          <span className="category-pill-text">Miscellaneous</span>
+        </span>
+        <span style={{ fontSize: 10.5, color: '#6366F1', paddingLeft: 6, fontWeight: 500 }}>
+          {category}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <span className="category-pill" style={{ background: color + '18', color }}>
-      <span className="cat-dot" style={{ background: color }} />
-      {category}
+      <span className="cat-dot" style={{ background: color, flexShrink: 0 }} />
+      <span className="category-pill-text">{category}</span>
     </span>
   )
 }
@@ -66,7 +82,13 @@ export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdi
     }
   }
 
-  const filtered = categoryFilter === 'all' ? expenses : expenses.filter(e => e.category === categoryFilter)
+  const filtered = categoryFilter === 'all'
+    ? expenses
+    : categoryFilter === 'Miscellaneous'
+      // Match explicit "Miscellaneous" AND any category not in the predefined list
+      // (old/removed categories like "Investments & Savings" also display as Miscellaneous)
+      ? expenses.filter(e => e.category === 'Miscellaneous' || !CATEGORIES.includes(e.category))
+      : expenses.filter(e => e.category === categoryFilter)
   const totalAmount = filtered.reduce((sum, e) => sum + e.amount, 0)
   const avgAmount = filtered.length > 0 ? totalAmount / filtered.length : 0
 
@@ -206,6 +228,7 @@ export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdi
               <div>Category</div>
               <div>Date</div>
               <div style={{ textAlign: 'right' }}>Amount</div>
+              <div />
             </div>
             {filtered.map(expense => (
               <div key={expense.id} className="expense-row">
@@ -234,6 +257,7 @@ export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdi
                     className="btn btn-secondary btn-sm"
                     onClick={() => onEdit(expense)}
                     title="Edit"
+                    style={{ padding: '4px 8px' }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
@@ -241,6 +265,7 @@ export default function ExpenseList({ expenses, isLoading, onFilterChange, onEdi
                     className="btn btn-danger btn-sm"
                     onClick={() => onDelete(expense.id)}
                     title="Delete"
+                    style={{ padding: '4px 8px' }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                   </button>

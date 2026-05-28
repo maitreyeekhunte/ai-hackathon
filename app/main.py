@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from .models import (
     Expense, Attachment, RecurringTransaction, LinkedAccount, TransactionSplit,
     Category, CategoryRule, MerchantMapping, CategoryFeedback,
-    Budget, CategoryBudget,
+    Budget, CategoryBudget, UploadHistory,
 )
 from .crud import (
     create_expense, get_expenses_by_date_range, bulk_create_expenses,
@@ -64,7 +64,8 @@ def recategorize_expenses(session: Session = Depends(get_session)):
     """Re-run AI categorisation on all expenses whose category is Other or uncategorized."""
     targets = session.exec(
         select(Expense).where(
-            (Expense.category == "Other") | (Expense.category == "uncategorized") | (Expense.category == "")
+            (Expense.category == "Miscellaneous") | (Expense.category == "Other") |
+            (Expense.category == "uncategorized") | (Expense.category == "")
         )
     ).all()
     updated = 0
@@ -164,17 +165,29 @@ def update_expense(expense_id: int, expense_in: Expense, session: Session = Depe
     expense = session.get(Expense, expense_id)
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
-    
+
+    # SQLite Date column requires a real Python date object, not a string
+    dt = expense_in.date
+    if isinstance(dt, str):
+        try:
+            dt = try_parse_date(dt)
+        except Exception:
+            try:
+                from datetime import date as _date
+                dt = _date.fromisoformat(dt)
+            except Exception as ex:
+                raise HTTPException(status_code=400, detail=f"Invalid date format: {ex}")
+
     expense.description = expense_in.description
     expense.category = expense_in.category
-    expense.amount = expense_in.amount
-    expense.date = expense_in.date
-    expense.merchant = expense_in.merchant
-    expense.notes = expense_in.notes
+    expense.amount = float(expense_in.amount)
+    expense.date = dt
+    expense.merchant = expense_in.merchant or None
+    expense.notes = expense_in.notes or None
     expense.is_recurring = expense_in.is_recurring
     expense.recurring_frequency = expense_in.recurring_frequency if expense_in.is_recurring else None
     expense.updated_at = datetime.utcnow()
-    
+
     session.add(expense)
     session.commit()
     session.refresh(expense)
@@ -423,19 +436,23 @@ def sync_linked_account(account_id: int, session: Session = Depends(get_session)
     return {"detail": f"Synced {account.bank_name}", "last_sync": account.last_sync}
 
 
-# ===== CSV UPLOAD =====
+# ===== CSV / PDF UPLOAD =====
 
 @app.post("/upload-statement", response_model=List[Expense])
 async def upload_statement(file: UploadFile = File(...), session: Session = Depends(get_session)):
-    filename = (file.filename or '').lower()
+    original_name = file.filename or 'unknown'
+    filename_lower = original_name.lower()
     content = await file.read()
 
-    if filename.endswith('.pdf') or file.content_type == 'application/pdf':
+    if filename_lower.endswith('.pdf') or file.content_type == 'application/pdf':
+        file_type = 'PDF'
         try:
             parsed = parse_pdf_statement(content)
         except Exception as e:
+            _save_upload_history(session, original_name, file_type, 0, 'failure', str(e))
             raise HTTPException(status_code=400, detail=f'Failed to parse PDF: {str(e)}')
-    elif filename.endswith('.csv') or file.content_type in ('text/csv', 'application/vnd.ms-excel'):
+    elif filename_lower.endswith('.csv') or file.content_type in ('text/csv', 'application/vnd.ms-excel'):
+        file_type = 'CSV'
         try:
             text = content.decode('utf-8')
         except UnicodeDecodeError:
@@ -443,6 +460,13 @@ async def upload_statement(file: UploadFile = File(...), session: Session = Depe
         parsed = parse_csv_statement(text)
     else:
         raise HTTPException(status_code=400, detail='Only CSV and PDF statement uploads are supported')
+
+    # Safety-net: drop any income/credit rows that slipped through the parser
+    from .utils.parser import _is_income_description
+    parsed = [
+        row for row in parsed
+        if not _is_income_description(row.get('description', ''))
+    ]
 
     # Batch-categorise all rows that need it in a single API call
     needs_cat = [
@@ -461,7 +485,7 @@ async def upload_statement(file: UploadFile = File(...), session: Session = Depe
         description = row.get('description', '')
         merchant = row.get('merchant')
         amount = row.get('amount', 0.0)
-        category = row.get('category', 'Other')
+        category = row.get('category', 'Miscellaneous')
         is_recurring = bool(row.get('is_recurring', False))
         recurring_frequency = row.get('recurring_frequency') if is_recurring else None
         e = Expense(
@@ -474,8 +498,44 @@ async def upload_statement(file: UploadFile = File(...), session: Session = Depe
             recurring_frequency=recurring_frequency,
         )
         expenses.append(e)
+
     created = bulk_create_expenses(session, expenses=expenses)
+    _save_upload_history(session, original_name, file_type, len(created), 'success')
     return created
+
+
+def _save_upload_history(
+    session, filename: str, file_type: str,
+    count: int, status: str, error: str = None
+):
+    entry = UploadHistory(
+        original_filename=filename,
+        file_type=file_type,
+        transaction_count=count,
+        status=status,
+        error_message=error,
+    )
+    session.add(entry)
+    session.commit()
+
+
+# ===== UPLOAD HISTORY =====
+
+@app.get("/upload-history")
+def get_upload_history(session: Session = Depends(get_session)):
+    return session.exec(
+        select(UploadHistory).order_by(UploadHistory.uploaded_at.desc())
+    ).all()
+
+
+@app.delete("/upload-history/{history_id}")
+def delete_upload_history(history_id: int, session: Session = Depends(get_session)):
+    entry = session.get(UploadHistory, history_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="History entry not found")
+    session.delete(entry)
+    session.commit()
+    return {"detail": "Deleted"}
 
 
 # ===== RECEIPT OCR ENDPOINT =====
@@ -771,14 +831,15 @@ def get_budget_analysis(budget_id: int, session: Session = Depends(get_session))
     expenses = get_expenses_by_date_range(session, start, end)
 
     # Only include expenses (not income/refunds) — positive amounts
-    expenses = [e for e in expenses if e.amount > 0 and e.category not in ('Income', 'Transfers')]
+    expenses = [e for e in expenses if e.amount > 0 and e.category != 'Income']
 
     total_actual = sum(e.amount for e in expenses)
 
-    # Per-category actuals
+    # Per-category actuals — any custom/non-predefined category counts as Miscellaneous
     cat_actuals: dict = {}
     for e in expenses:
-        cat_actuals[e.category] = cat_actuals.get(e.category, 0.0) + e.amount
+        cat_key = e.category if e.category in PREDEFINED_CATEGORIES else "Miscellaneous"
+        cat_actuals[cat_key] = cat_actuals.get(cat_key, 0.0) + e.amount
 
     cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
     budgeted_cats = {cb.category: cb.amount for cb in cat_budgets}
@@ -787,11 +848,11 @@ def get_budget_analysis(budget_id: int, session: Session = Depends(get_session))
         if budgeted is None or budgeted == 0:
             return "none"
         pct = (actual / budgeted) * 100
-        if pct >= 100:
-            return "red"
-        elif pct >= 80:
-            return "yellow"
-        return "green"
+        if pct > 120:
+            return "red"     # > 120% — significantly over budget
+        elif pct > 100:
+            return "yellow"  # 100–120% — slightly over budget
+        return "green"       # ≤ 100% — within budget
 
     # Categories with a budget set
     category_analysis = []
@@ -837,11 +898,12 @@ def get_budget_ai_summary(budget_id: int, session: Session = Depends(get_session
 
     start, end = _budget_date_range(budget)
     expenses = get_expenses_by_date_range(session, start, end)
-    expenses = [e for e in expenses if e.amount > 0 and e.category not in ('Income', 'Transfers')]
+    expenses = [e for e in expenses if e.amount > 0 and e.category != 'Income']
 
     cat_totals: dict = {}
     for e in expenses:
-        cat_totals[e.category] = cat_totals.get(e.category, 0.0) + e.amount
+        cat_key = e.category if e.category in PREDEFINED_CATEGORIES else "Miscellaneous"
+        cat_totals[cat_key] = cat_totals.get(cat_key, 0.0) + e.amount
 
     cat_budgets = session.exec(select(CategoryBudget).where(CategoryBudget.budget_id == budget_id)).all()
     budgeted_cats = {cb.category: cb.amount for cb in cat_budgets}
