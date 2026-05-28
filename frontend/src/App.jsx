@@ -170,9 +170,15 @@ export default function App() {
       {/* ── Sidebar ───────────────────────────────────── */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-logo">FA</div>
+          <div className="brand-logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1" y="6" width="22" height="15" rx="3"/>
+              <path d="M16 11h4v4h-4a2 2 0 0 1 0-4z"/>
+              <path d="M1 10h22"/>
+            </svg>
+          </div>
           <div>
-            <div className="brand-name">FinanceAI</div>
+            <div className="brand-name">SmartPocket</div>
             <div className="brand-tagline">Expense Tracker</div>
           </div>
         </div>

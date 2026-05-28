@@ -5,8 +5,115 @@ const API_URL = 'http://localhost:8000'
 const CATEGORIES = [
   'Food & Dining', 'Transportation', 'Shopping', 'Entertainment',
   'Bills & Utilities', 'Healthcare', 'Travel', 'Education',
-  'Personal Care', 'Home', 'Investments & Savings', 'Other',
+  'Personal Care', 'Home', 'Transfers', 'Miscellaneous',
 ]
+
+// ── Category colours (shared with pie chart) ──────────────────────────────────
+const CAT_COLORS_MAP = {
+  'Food & Dining':     '#F59E0B',
+  'Transportation':    '#3B82F6',
+  'Shopping':          '#EC4899',
+  'Entertainment':     '#8B5CF6',
+  'Bills & Utilities': '#EF4444',
+  'Healthcare':        '#10B981',
+  'Travel':            '#06B6D4',
+  'Education':         '#F97316',
+  'Personal Care':     '#D946EF',
+  'Home':              '#84CC16',
+  'Transfers':         '#64748B',
+  'Miscellaneous':     '#94A3B8',
+}
+const EXTRA_COLORS = ['#6366F1', '#14B8A6', '#0EA5E9', '#A855F7', '#FB923C', '#34D399']
+
+function getCatColor(cat, idx) {
+  return CAT_COLORS_MAP[cat] || EXTRA_COLORS[idx % EXTRA_COLORS.length]
+}
+
+// ── SVG Donut chart helpers ────────────────────────────────────────────────────
+function polar(cx, cy, r, deg) {
+  const rad = ((deg - 90) * Math.PI) / 180
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+function arcPath(cx, cy, outer, inner, start, end) {
+  // Full circle: draw two 180° arcs to avoid degenerate path
+  if (end - start >= 359.99) {
+    const t = polar(cx, cy, outer, start)
+    const b = polar(cx, cy, outer, start + 180)
+    const ti = polar(cx, cy, inner, start)
+    const bi = polar(cx, cy, inner, start + 180)
+    return [
+      `M${t.x},${t.y} A${outer},${outer} 0 1 1 ${b.x},${b.y} A${outer},${outer} 0 1 1 ${t.x},${t.y}`,
+      `M${ti.x},${ti.y} A${inner},${inner} 0 1 0 ${bi.x},${bi.y} A${inner},${inner} 0 1 0 ${ti.x},${ti.y} Z`,
+    ].join(' ')
+  }
+  const so = polar(cx, cy, outer, start)
+  const eo = polar(cx, cy, outer, end)
+  const si = polar(cx, cy, inner, end)
+  const ei = polar(cx, cy, inner, start)
+  const lg = end - start > 180 ? 1 : 0
+  return `M${so.x},${so.y} A${outer},${outer} 0 ${lg} 1 ${eo.x},${eo.y} L${si.x},${si.y} A${inner},${inner} 0 ${lg} 0 ${ei.x},${ei.y} Z`
+}
+
+function DonutChart({ data, totalActual }) {
+  const cx = 110, cy = 110, outer = 88, inner = 52
+  let angle = 0
+  const slices = data
+    .filter(d => d.amount > 0)
+    .map((d, i) => {
+      const pct = totalActual > 0 ? d.amount / totalActual : 0
+      const start = angle
+      const end = angle + pct * 360
+      angle = end
+      return { ...d, start, end, pct, color: getCatColor(d.category, i) }
+    })
+
+  const fmtCenter = n => {
+    if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`
+    if (n >= 1000)   return `₹${(n / 1000).toFixed(1)}k`
+    return `₹${Math.round(n)}`
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* SVG chart */}
+      <div style={{ flexShrink: 0 }}>
+        <svg viewBox="0 0 220 220" width={220} height={220}>
+          {slices.map((s, i) =>
+            s.end - s.start > 0.05 ? (
+              <path key={i} d={arcPath(cx, cy, outer, inner, s.start, s.end)} fill={s.color} />
+            ) : null
+          )}
+          {/* Hole */}
+          <circle cx={cx} cy={cy} r={inner} fill="white" />
+          {/* Center label */}
+          <text x={cx} y={cy - 10} textAnchor="middle" fontSize="11" fill="#94A3B8" fontFamily="inherit">Spent</text>
+          <text x={cx} y={cy + 10} textAnchor="middle" fontSize="16" fontWeight="700" fill="#0F172A" fontFamily="inherit">
+            {fmtCenter(totalActual)}
+          </text>
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 9, minWidth: 180 }}>
+        {slices.map((s, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 11, height: 11, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 13, color: '#374151', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {s.category}
+            </span>
+            <span style={{ fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>
+              ₹{s.amount.toLocaleString('en-IN')}
+            </span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: s.color, width: 40, textAlign: 'right' }}>
+              {(s.pct * 100).toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const STATUS_COLORS = {
   green: { bar: '#22c55e', bg: '#f0fdf4', text: '#15803d' },
@@ -115,6 +222,33 @@ export default function BudgetTracker() {
     if (form.period_type === 'monthly' && !form.month) { showMsg('error', 'Please select a month.'); return }
     if (form.period_type === 'custom' && (!form.start_date || !form.end_date)) {
       showMsg('error', 'Please enter start and end dates.'); return
+    }
+
+    // Validate: no negative values
+    if (form.total_budget && parseFloat(form.total_budget) < 0) {
+      showMsg('error', 'Total budget cannot be negative.'); return
+    }
+    const hasNegCat = form.category_budgets.some(cb => cb.amount !== '' && parseFloat(cb.amount) < 0)
+    if (hasNegCat) {
+      showMsg('error', 'Category budget amounts cannot be negative.'); return
+    }
+
+    // Validate: sum of category budgets must not exceed total budget
+    if (form.total_budget) {
+      const totalBudget = parseFloat(form.total_budget)
+      const catTotal = Math.round(
+        form.category_budgets
+          .filter(cb => cb.amount && parseFloat(cb.amount) > 0)
+          .reduce((sum, cb) => sum + parseFloat(cb.amount), 0) * 100
+      ) / 100
+      if (catTotal > totalBudget) {
+        const fmt = n => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+        showMsg('error',
+          `Category budgets total (${fmt(catTotal)}) exceeds total budget (${fmt(totalBudget)}). ` +
+          `Reduce by ${fmt(catTotal - totalBudget)}.`
+        )
+        return
+      }
     }
 
     const payload = {
@@ -283,9 +417,17 @@ export default function BudgetTracker() {
             <input
               type="number"
               placeholder="e.g. 50000"
+              min="0"
+              step="any"
               value={form.total_budget}
               onChange={e => setForm(f => ({ ...f, total_budget: e.target.value }))}
+              style={form.total_budget !== '' && parseFloat(form.total_budget) < 0 ? { borderColor: '#EF4444', boxShadow: '0 0 0 3px rgba(239,68,68,0.1)' } : {}}
             />
+            {form.total_budget !== '' && parseFloat(form.total_budget) < 0 && (
+              <div style={{ fontSize: 12, color: '#DC2626', marginTop: 4, fontWeight: 500 }}>
+                Total budget cannot be negative.
+              </div>
+            )}
           </div>
 
           <div>
@@ -299,8 +441,15 @@ export default function BudgetTracker() {
                   <input
                     type="number"
                     placeholder="₹"
+                    min="0"
+                    step="any"
                     value={cb.amount}
-                    style={{ flex: 1, padding: '6px 10px', fontSize: 13 }}
+                    style={{
+                      flex: 1, padding: '6px 10px', fontSize: 13,
+                      ...(cb.amount !== '' && parseFloat(cb.amount) < 0
+                        ? { borderColor: '#EF4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.15)' }
+                        : {}),
+                    }}
                     onChange={e => {
                       const updated = [...form.category_budgets]
                       updated[i] = { ...cb, amount: e.target.value }
@@ -310,6 +459,47 @@ export default function BudgetTracker() {
                 </div>
               ))}
             </div>
+
+            {/* Live negative-value warning */}
+            {form.category_budgets.some(cb => cb.amount !== '' && parseFloat(cb.amount) < 0) && (
+              <div style={{
+                marginTop: 10, padding: '8px 14px', borderRadius: 8,
+                background: '#FEF2F2', border: '1px solid #FECACA',
+                fontSize: 12.5, color: '#991B1B', fontWeight: 500,
+              }}>
+                Category budget amounts cannot be negative.
+              </div>
+            )}
+
+            {/* Live running total vs total budget */}
+            {(() => {
+              const catTotal = Math.round(
+                form.category_budgets
+                  .filter(cb => cb.amount && parseFloat(cb.amount) > 0)
+                  .reduce((sum, cb) => sum + parseFloat(cb.amount), 0) * 100
+              ) / 100
+              const totalBudget = form.total_budget ? parseFloat(form.total_budget) : null
+              const fmt = n => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+              const isOver = totalBudget != null && catTotal > totalBudget
+              if (catTotal === 0) return null
+              return (
+                <div style={{
+                  marginTop: 14, padding: '10px 14px', borderRadius: 8,
+                  background: isOver ? '#FEF2F2' : '#F0FDF4',
+                  border: `1px solid ${isOver ? '#FECACA' : '#A7F3D0'}`,
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: isOver ? '#991B1B' : '#065F46' }}>
+                    Category total: {fmt(catTotal)}
+                  </span>
+                  {totalBudget != null && (
+                    <span style={{ fontSize: 12, color: isOver ? '#DC2626' : '#6B7280' }}>
+                      {isOver ? `Exceeds total by ${fmt(catTotal - totalBudget)}` : `${fmt(totalBudget - catTotal)} remaining`}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
@@ -327,6 +517,18 @@ export default function BudgetTracker() {
   if (view === 'analysis' && analysis) {
     const { total, category_analysis, unbudgeted_categories, period } = analysis
     const hasTotalBudget = total.budgeted != null
+
+    // Build pie chart data — merge non-predefined categories into Miscellaneous
+    const PREDEFINED_SET = new Set(CATEGORIES)
+    const pieMap = {}
+    ;[
+      ...category_analysis.map(c => ({ category: c.category, amount: c.actual })),
+      ...unbudgeted_categories.map(c => ({ category: c.category, amount: c.actual })),
+    ].filter(d => d.amount > 0).forEach(d => {
+      const key = PREDEFINED_SET.has(d.category) ? d.category : 'Miscellaneous'
+      pieMap[key] = (pieMap[key] || 0) + d.amount
+    })
+    const pieData = Object.entries(pieMap).map(([category, amount]) => ({ category, amount }))
 
     return (
       <div style={{ maxWidth: 720, margin: '0 auto' }}>
@@ -357,7 +559,7 @@ export default function BudgetTracker() {
             {hasTotalBudget && (
               <StatusBadge
                 status={total.status}
-                label={total.percentage >= 100 ? 'Over Budget' : total.percentage >= 80 ? 'Near Limit' : 'On Track'}
+                label={total.percentage > 120 ? 'Way Over Budget' : total.percentage > 100 ? 'Over Budget' : 'On Track'}
               />
             )}
           </div>
@@ -371,7 +573,15 @@ export default function BudgetTracker() {
           )}
         </div>
 
-        {/* Category Analysis */}
+        {/* Spending Breakdown Pie Chart */}
+        {pieData.length > 0 && (
+          <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+            <h3 style={{ margin: '0 0 20px' }}>Spending Breakdown</h3>
+            <DonutChart data={pieData} totalActual={total.actual} />
+          </div>
+        )}
+
+        {/* Category Budgets — only categories where user set a budget */}
         {category_analysis.length > 0 && (
           <div className="card" style={{ padding: 24, marginBottom: 16 }}>
             <h3 style={{ margin: '0 0 16px' }}>Category Budgets</h3>
@@ -386,7 +596,7 @@ export default function BudgetTracker() {
                       </span>
                       <StatusBadge
                         status={cat.status}
-                        label={cat.percentage >= 100 ? `${cat.percentage}% over` : `${cat.percentage}%`}
+                        label={cat.percentage > 120 ? `${cat.percentage}% — Way Over` : cat.percentage > 100 ? `${cat.percentage}% — Over` : `${cat.percentage}%`}
                       />
                     </div>
                   </div>
@@ -397,27 +607,12 @@ export default function BudgetTracker() {
           </div>
         )}
 
-        {/* Unbudgeted Categories */}
-        {unbudgeted_categories.length > 0 && (
-          <div className="card" style={{ padding: 24, marginBottom: 16 }}>
-            <h3 style={{ margin: '0 0 16px' }}>Other Spending (No Budget Set)</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {unbudgeted_categories.map(cat => (
-                <div key={cat.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <span style={{ fontWeight: 500, fontSize: 14 }}>{cat.category}</span>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>₹{cat.actual.toLocaleString('en-IN')}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Legend */}
         <div style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap' }}>
           {[
-            { status: 'green', label: 'Under 80% — On Track' },
-            { status: 'yellow', label: '80–100% — Near Limit' },
-            { status: 'red', label: 'Over 100% — Exceeded' },
+            { status: 'green',  label: '≤ 100% — Within Budget' },
+            { status: 'yellow', label: '100–120% — Over Budget' },
+            { status: 'red',    label: '> 120% — Significantly Over' },
           ].map(({ status, label }) => (
             <div key={status} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
               <div style={{ width: 12, height: 12, borderRadius: 3, background: STATUS_COLORS[status].bar }} />

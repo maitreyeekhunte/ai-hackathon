@@ -13,10 +13,8 @@ PREDEFINED_CATEGORIES = [
     "Education",
     "Personal Care",
     "Home",
-    "Investments & Savings",
-    "Income",
     "Transfers",
-    "Other",
+    "Miscellaneous",
 ]
 
 _KEYWORD_FALLBACK = {
@@ -169,25 +167,14 @@ _KEYWORD_FALLBACK = {
     "furniture": "Home",
     "maintenance": "Home",
     "house": "Home",
-    # ── Investments & Savings ──────────────────────────────────────────────
-    "zerodha": "Investments & Savings",
-    "groww": "Investments & Savings",
-    "mutual fund": "Investments & Savings",
-    "sip": "Investments & Savings",
-    "nifty": "Investments & Savings",
-    "investment": "Investments & Savings",
-    "fd": "Investments & Savings",
-    "ppf": "Investments & Savings",
-    "nps": "Investments & Savings",
-    "brokerage": "Investments & Savings",
-    "401k": "Investments & Savings",
-    # ── Income ─────────────────────────────────────────────────────────────
-    "salary": "Income",
-    "payroll": "Income",
-    "dividend": "Income",
-    "interest credit": "Income",
-    "bonus": "Income",
-    "refund": "Income",
+    # ── Investments (mapped to Transfers — money moving to investment accounts) ──
+    "zerodha": "Transfers",
+    "groww": "Transfers",
+    "mutual fund": "Transfers",
+    "sip": "Transfers",
+    "investment": "Transfers",
+    "brokerage": "Transfers",
+    "401k": "Transfers",
     # ── Transfers ──────────────────────────────────────────────────────────
     "transfer": "Transfers",
     "upi": "Transfers",
@@ -252,13 +239,15 @@ def ai_categorize(
 ) -> str:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return _keyword_fallback(f"{description} {merchant or ''}") or "Other"
+        return _keyword_fallback(f"{description} {merchant or ''}") or "Miscellaneous"
 
     try:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key)
-        categories_str = "\n".join(f"- {c}" for c in PREDEFINED_CATEGORIES)
+        # Exclude Miscellaneous from the list shown to AI — it should generate a custom label instead
+        predefined_for_ai = [c for c in PREDEFINED_CATEGORIES if c != "Miscellaneous"]
+        categories_str = "\n".join(f"- {c}" for c in predefined_for_ai)
 
         examples_str = ""
         if feedback_examples:
@@ -271,7 +260,7 @@ def ai_categorize(
 
         prompt = (
             f"You are an expense categorisation assistant for Indian users. "
-            f"Categorise the transaction below into exactly one of these categories:\n{categories_str}"
+            f"Categorise the transaction below into exactly one of these predefined categories:\n{categories_str}"
             f"{examples_str}\n\n"
             f"Transaction:\nDescription: {description}{merchant_part}\nAmount: ₹{amount:.2f}\n\n"
             f"Rules:\n"
@@ -279,26 +268,42 @@ def ai_categorize(
             f"- Ride-hailing apps (Ola, Uber, Rapido) → Transportation\n"
             f"- Telecom recharges (Jio, Airtel) → Bills & Utilities\n"
             f"- Streaming services (Netflix, Hotstar) → Entertainment\n"
+            f"- If the transaction clearly fits a predefined category, return that category name exactly.\n"
+            f"- If it does NOT fit any predefined category, invent a concise descriptive category "
+            f"(2-4 words, Title Case) that precisely describes this expense. "
+            f"Examples: 'Pet Care', 'Gifts & Donations', 'Charitable Giving', 'Office Supplies', 'Sports Equipment'.\n"
+            f"- NEVER return 'Other', 'Miscellaneous', or 'Uncategorized'.\n"
             f"- Reply with ONLY the category name, nothing else."
         )
 
         response = client.chat.completions.create(
             model="gpt-4o",
-            max_tokens=20,
+            max_tokens=30,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = response.choices[0].message.content.strip()
+        result = response.choices[0].message.content.strip().strip('"').strip("'")
 
+        # If AI returned a predefined category, use it
         if result in PREDEFINED_CATEGORIES:
             return result
         lower = result.lower()
         for cat in PREDEFINED_CATEGORIES:
+            if cat.lower() == lower:
+                return cat
+        # Fuzzy match to predefined (but not Miscellaneous)
+        for cat in predefined_for_ai:
             if cat.lower() in lower or lower in cat.lower():
                 return cat
-        return "Other"
+
+        # AI returned a custom descriptive label — return it as-is
+        # The UI will show it alongside a "Miscellaneous" secondary tag
+        if result and result.lower() not in ("other", "miscellaneous", "uncategorized", "unknown"):
+            return result
+
+        return "Miscellaneous"
 
     except Exception:
-        return _keyword_fallback(f"{description} {merchant or ''}") or "Other"
+        return _keyword_fallback(f"{description} {merchant or ''}") or "Miscellaneous"
 
 
 def categorize_transaction(
@@ -330,6 +335,8 @@ def batch_categorize(
 
     Each item in rows must have keys: description, merchant, amount.
     Returns a list of category strings in the same order.
+    If the AI cannot match a predefined category, it returns a descriptive custom label.
+    Custom labels are stored as-is; the UI shows them alongside a 'Miscellaneous' badge.
     """
     results = []
     needs_ai: List[int] = []  # indices that still need AI after keyword/merchant pass
@@ -350,12 +357,12 @@ def batch_categorize(
             needs_ai.append(i)
 
     if not needs_ai:
-        return [r or "Other" for r in results]
+        return [r or "Miscellaneous" for r in results]
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         for i in needs_ai:
-            results[i] = "Other"
+            results[i] = "Miscellaneous"
         return results
 
     # Pass 2: single batch API call for all remaining rows
@@ -364,7 +371,8 @@ def batch_categorize(
         import json
 
         client = OpenAI(api_key=api_key)
-        categories_str = "\n".join(f"- {c}" for c in PREDEFINED_CATEGORIES)
+        predefined_for_ai = [c for c in PREDEFINED_CATEGORIES if c != "Miscellaneous"]
+        categories_str = "\n".join(f"- {c}" for c in predefined_for_ai)
         feedback_examples = _get_recent_feedback_examples(session)
 
         examples_str = ""
@@ -382,43 +390,61 @@ def batch_categorize(
 
         prompt = (
             f"You are an expense categorisation assistant for Indian users.\n"
-            f"Categorise each transaction into exactly one of these categories:\n{categories_str}\n"
+            f"Categorise each transaction into exactly one category.\n\n"
+            f"Predefined categories (use these when they fit):\n{categories_str}\n"
             f"{examples_str}\n"
             f"Rules:\n"
             f"- Zomato/Swiggy → Food & Dining\n"
             f"- Ola/Uber/Rapido → Transportation\n"
             f"- Jio/Airtel recharges → Bills & Utilities\n"
-            f"- Netflix/Hotstar → Entertainment\n\n"
+            f"- Netflix/Hotstar → Entertainment\n"
+            f"- If a transaction clearly fits a predefined category, use that exact name.\n"
+            f"- If it does NOT fit any predefined category, invent a concise descriptive category "
+            f"(2-4 words, Title Case). Examples: 'Pet Care', 'Gifts & Donations', 'Office Supplies'.\n"
+            f"- NEVER return 'Other', 'Miscellaneous', or 'Uncategorized'.\n\n"
             f"Transactions to categorise:\n{transactions_str}\n"
-            f"Reply with a JSON array of category strings in the same order, e.g. [\"Food & Dining\", \"Transportation\"]. "
-            f"Nothing else."
+            f"Reply with a JSON object like: {{\"categories\": [\"Food & Dining\", \"Pet Care\"]}}. "
+            f"One entry per transaction, in the same order. Nothing else."
         )
 
         response = client.chat.completions.create(
             model="gpt-4o",
-            max_tokens=200,
+            max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content.strip()
         parsed = json.loads(raw)
-        # Accept {"categories": [...]} or just a list at any key
         if isinstance(parsed, dict):
             cats = next(iter(parsed.values()))
         else:
             cats = parsed
 
         for local_idx, global_idx in enumerate(needs_ai):
-            cat = cats[local_idx] if local_idx < len(cats) else "Other"
-            if cat not in PREDEFINED_CATEGORIES:
-                lower = cat.lower()
-                cat = next((c for c in PREDEFINED_CATEGORIES if c.lower() in lower or lower in c.lower()), "Other")
-            results[global_idx] = cat
+            cat = cats[local_idx] if local_idx < len(cats) else "Miscellaneous"
+            cat = str(cat).strip().strip('"').strip("'")
+
+            # Normalize: if AI returned something close to a predefined category, use the exact name
+            if cat in PREDEFINED_CATEGORIES:
+                results[global_idx] = cat
+                continue
+            lower = cat.lower()
+            matched = next(
+                (c for c in predefined_for_ai if c.lower() == lower or c.lower() in lower or lower in c.lower()),
+                None
+            )
+            if matched:
+                results[global_idx] = matched
+            elif cat.lower() in ("other", "miscellaneous", "uncategorized", "unknown", ""):
+                results[global_idx] = "Miscellaneous"
+            else:
+                # Keep the AI-generated custom descriptive label
+                results[global_idx] = cat
 
     except Exception:
         for i in needs_ai:
             results[i] = _keyword_fallback(
                 f"{rows[i].get('description','')} {rows[i].get('merchant') or ''}"
-            ) or "Other"
+            ) or "Miscellaneous"
 
     return results

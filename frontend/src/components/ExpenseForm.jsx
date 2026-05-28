@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 const CATEGORIES = [
   'Food & Dining', 'Transportation', 'Shopping', 'Entertainment',
   'Bills & Utilities', 'Healthcare', 'Travel', 'Education',
-  'Personal Care', 'Home', 'Investments & Savings', 'Income', 'Transfers', 'Other',
+  'Personal Care', 'Home', 'Transfers', 'Miscellaneous',
 ]
 
 const BLANK = {
@@ -19,21 +19,28 @@ const BLANK = {
 
 export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCancel }) {
   const [formData, setFormData] = useState(BLANK)
+  // Holds the custom category name typed when "Miscellaneous" is selected
+  const [customCategory, setCustomCategory] = useState('')
 
   useEffect(() => {
     if (editingExpense) {
+      const isCustom = !CATEGORIES.includes(editingExpense.category)
       setFormData({
         description:         editingExpense.description         || '',
-        category:            editingExpense.category            || 'Food & Dining',
-        amount:              editingExpense.amount              || '',
+        // If the saved category is a custom AI label, show Miscellaneous in the select
+        category:            isCustom ? 'Miscellaneous' : (editingExpense.category || 'Food & Dining'),
+        amount:              editingExpense.amount != null ? String(editingExpense.amount) : '',
         date:                editingExpense.date                || new Date().toISOString().split('T')[0],
         merchant:            editingExpense.merchant            || '',
         notes:               editingExpense.notes               || '',
         is_recurring:        editingExpense.is_recurring        || false,
         recurring_frequency: editingExpense.recurring_frequency || 'monthly',
       })
+      // Pre-fill the custom text field with the saved custom label
+      setCustomCategory(isCustom ? editingExpense.category : '')
     } else {
       setFormData(BLANK)
+      setCustomCategory('')
     }
   }, [editingExpense])
 
@@ -41,19 +48,43 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
     const { name, value, type, checked } = e.target
     setFormData(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : (name === 'amount' ? parseFloat(value) || '' : value),
+      // Keep amount as a string — never convert mid-edit to avoid float drift
+      [name]: type === 'checkbox' ? checked : value,
     }))
+    if (name === 'category' && value !== 'Miscellaneous') {
+      setCustomCategory('')
+    }
   }
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!formData.description.trim() || !formData.amount) {
-      alert('Please fill in description and amount.')
+    if (!formData.description.trim()) {
+      alert('Please fill in a description.')
       return
     }
-    onSubmit(formData)
-    if (!editingExpense) setFormData(BLANK)
+    const parsedAmount = parseFloat(formData.amount)
+    if (!formData.amount || isNaN(parsedAmount)) {
+      alert('Please enter a valid amount.')
+      return
+    }
+    if (parsedAmount <= 0) {
+      alert('Amount must be greater than 0.')
+      return
+    }
+
+    const finalCategory =
+      formData.category === 'Miscellaneous' && customCategory.trim()
+        ? customCategory.trim()
+        : formData.category
+
+    onSubmit({ ...formData, category: finalCategory, amount: parsedAmount })
+    if (!editingExpense) {
+      setFormData(BLANK)
+      setCustomCategory('')
+    }
   }
+
+  const isMiscellaneous = formData.category === 'Miscellaneous'
 
   return (
     <div style={{ maxWidth: 660 }}>
@@ -78,23 +109,56 @@ export default function ExpenseForm({ onSubmit, isLoading, editingExpense, onCan
         <div className="form-grid-2">
           <div className="form-group">
             <label htmlFor="category">Category <span style={{ color: '#EF4444' }}>*</span></label>
-            <select id="category" name="category" value={formData.category} onChange={handleChange} disabled={isLoading}>
+            <select
+              id="category"
+              name="category"
+              value={formData.category}
+              onChange={handleChange}
+              disabled={isLoading}
+            >
               {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
+
+            {/* Custom category field — only visible when Miscellaneous is selected */}
+            {isMiscellaneous && (
+              <div style={{ marginTop: 8 }}>
+                <input
+                  type="text"
+                  value={customCategory}
+                  onChange={e => setCustomCategory(e.target.value)}
+                  placeholder="Enter custom category (e.g. Pet Care)"
+                  disabled={isLoading}
+                  autoFocus
+                  style={{ borderColor: customCategory.trim() ? '#6366F1' : undefined }}
+                />
+                {customCategory.trim() && (
+                  <div style={{ fontSize: 11.5, color: '#6366F1', marginTop: 4 }}>
+                    Will be saved as "{customCategory.trim()}" under Miscellaneous
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+
           <div className="form-group">
             <label htmlFor="amount">Amount (₹) <span style={{ color: '#EF4444' }}>*</span></label>
             <input
               id="amount"
               type="number"
               name="amount"
-              step="0.01"
+              step="any"
               min="0"
               value={formData.amount}
               onChange={handleChange}
               placeholder="0.00"
               disabled={isLoading}
+              style={formData.amount !== '' && parseFloat(formData.amount) < 0 ? { borderColor: '#EF4444', boxShadow: '0 0 0 3px rgba(239,68,68,0.1)' } : {}}
             />
+            {formData.amount !== '' && parseFloat(formData.amount) < 0 && (
+              <div style={{ fontSize: 12, color: '#DC2626', marginTop: 4, fontWeight: 500 }}>
+                Amount cannot be negative.
+              </div>
+            )}
           </div>
         </div>
 

@@ -4,6 +4,36 @@ import re
 from datetime import datetime, date
 from typing import List, Dict, Optional
 
+# ── Income / credit-transaction detection ─────────────────────────────────────
+# Any description matching one of these patterns is treated as income and skipped.
+_INCOME_KEYWORDS = frozenset({
+    # Salary / wages
+    'salary', 'sal cr', 'sal credit', 'wages', 'payroll', 'stipend',
+    # Interest
+    'interest earned', 'interest credit', 'int credit', 'interest income',
+    'savings interest', 'fd interest', 'rd interest', 'interest paid',
+    # Refunds
+    'refund', 'reversal', 'chargeback',
+    # Cashback / rewards
+    'cashback', 'cash back', 'reward redemption', 'reward credit',
+    # Bonus / incentive
+    'bonus credit', 'joining bonus', 'incentive credit',
+    # Dividend / maturity
+    'dividend', 'maturity proceeds', 'fd maturity', 'rd maturity',
+    # Incoming transfers
+    'neft credit', 'neft cr', 'imps credit', 'imps cr',
+    'rtgs credit', 'rtgs cr', 'upi credit', 'upi cr',
+    'inward neft', 'inward imps', 'inward rtgs',
+    'credit by', 'received from', 'transfer credit',
+})
+
+
+def _is_income_description(description: str) -> bool:
+    """Return True if the description strongly indicates an income/credit transaction."""
+    lower = description.strip().lower()
+    return any(kw in lower for kw in _INCOME_KEYWORDS)
+
+
 COMMON_DATE_FORMATS = [
     "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%b-%Y", "%d %b %Y",
     "%d%b%Y",   # 19Jan2026 (no separator)
@@ -79,19 +109,34 @@ def parse_csv_statement(text: str) -> List[Dict]:
 
         raw_date = keys.get(date_key, '').strip()
 
-        # Try all amount-like columns in order; use first non-zero value
-        _amount_keywords = ('amount', 'amt', 'debit', 'credit', 'withdrawal', 'deposit', 'inr', 'sum', 'value')
-        amount_candidates = [k for k in keys if any(kw in k for kw in _amount_keywords)]
-        amount = 0.0
-        for cand in amount_candidates:
-            cleaned = re.sub(r'[^\d.]', '', (keys.get(cand) or '').replace(',', ''))
+        # ── Detect split debit / credit columns ───────────────────────────────
+        debit_col  = next((k for k in keys if any(kw in k for kw in ('debit', 'withdrawal', ' dr'))), None)
+        credit_col = next((k for k in keys if any(kw in k for kw in ('credit', 'deposit', ' cr'))), None)
+
+        if debit_col and credit_col and debit_col != credit_col:
+            # Split mode: only include rows with a debit value (expense rows).
+            # Rows where only credit has a value are income — skip them.
+            debit_raw = re.sub(r'[^\d.]', '', (keys.get(debit_col) or '').replace(',', ''))
             try:
-                val = float(cleaned) if cleaned else 0.0
+                amount = float(debit_raw) if debit_raw else 0.0
             except Exception:
-                val = 0.0
-            if val != 0.0:
-                amount = val
-                break
+                amount = 0.0
+            if amount == 0.0:
+                continue  # credit-only row — income, skip
+        else:
+            # Single-amount column: use first non-zero value across amount-like columns.
+            _amount_keywords = ('amount', 'amt', 'debit', 'withdrawal', 'inr', 'sum', 'value')
+            amount_candidates = [k for k in keys if any(kw in k for kw in _amount_keywords)]
+            amount = 0.0
+            for cand in amount_candidates:
+                cleaned = re.sub(r'[^\d.]', '', (keys.get(cand) or '').replace(',', ''))
+                try:
+                    val = float(cleaned) if cleaned else 0.0
+                except Exception:
+                    val = 0.0
+                if val != 0.0:
+                    amount = val
+                    break
 
         try:
             parsed_date = try_parse_date(raw_date)
@@ -104,6 +149,10 @@ def parse_csv_statement(text: str) -> List[Dict]:
         description = (keys.get(desc_key) or '').strip() if desc_key else ''
         merchant    = (keys.get(merchant_key) or '').strip() if merchant_key and merchant_key != desc_key else None
         category    = (keys.get(category_key) or '').strip() if category_key else 'uncategorized'
+
+        # Skip obvious income transactions even in single-column mode
+        if _is_income_description(description):
+            continue
 
         # Parse recurring flag
         raw_recurring = (keys.get(recurring_key) or '').strip().lower() if recurring_key else ''
@@ -241,13 +290,10 @@ def _parse_flat_table_rows(table: List[List]) -> List[Dict]:
         except Exception:
             continue
 
-        # Use debit if available, otherwise credit (income)
-        amount = None
-        if debit_str != '-':
-            amount = _clean_amount(debit_str)
-        elif credit_str != '-':
-            amount = _clean_amount(credit_str)
-
+        # Only include debit (expense) rows. Skip credit-only rows (income).
+        if debit_str == '-' or not debit_str.strip():
+            continue  # credit-only row — salary, refund, etc.
+        amount = _clean_amount(debit_str)
         if not amount:
             continue
 
@@ -308,9 +354,12 @@ def _parse_table_rows(table: List[List]) -> List[Dict]:
         if amount_i is not None:
             amount = _clean_amount(str(row[amount_i] or ''))
         else:
+            # Split debit/credit mode — only include debit (expense) rows.
             debit_val  = _clean_amount(str(row[debit_i] or ''))  if debit_i  is not None else None
             credit_val = _clean_amount(str(row[credit_i] or '')) if credit_i is not None else None
-            amount = debit_val or credit_val
+            if not debit_val:
+                continue  # credit-only row (income/refund/salary) — skip
+            amount = debit_val
 
         if not amount or amount == 0.0:
             continue
@@ -358,6 +407,11 @@ def _parse_text_lines(text: str) -> List[Dict]:
         # description = everything between the date and the last amount
         desc_part = line[date_match.end():].strip()
         desc_part = _AMOUNT_RE.sub('', desc_part).strip(' ,-|')
+
+        # Skip lines with a "Cr" credit indicator or income keywords
+        if re.search(r'\bCr\b', line) or _is_income_description(desc_part):
+            continue
+
         rows.append({
             'date': parsed_date,
             'description': desc_part,
@@ -411,21 +465,25 @@ def _parse_with_vision(content: bytes) -> List[Dict]:
     categories_str = ", ".join(f'"{c}"' for c in PREDEFINED_CATEGORIES)
 
     prompt = (
-        "These are pages from a bank statement. Extract every financial transaction across all pages.\n"
+        "These are pages from a bank statement. Extract only DEBIT / EXPENSE transactions "
+        "(money going OUT of the account).\n"
+        "DO NOT include: salary credits, interest earned, refunds, cashbacks, bonus payments, "
+        "bank credits, incoming NEFT/IMPS/RTGS/UPI transfers, or any other income.\n"
         "Return ONLY a JSON array (no markdown, no explanation) like:\n"
         '[{"date":"YYYY-MM-DD","description":"...","amount":1234.56,"type":"debit","category":"Food & Dining"}]\n\n'
         "Rules:\n"
-        "- Skip summary rows: Opening/Closing Balance, Balance Brought Forward, "
-        "Transaction Turnover, Transaction Count.\n"
+        "- Only include rows where money leaves the account (withdrawals, payments, purchases, fees).\n"
+        "- Skip: Opening/Closing Balance, Balance Brought Forward, Transaction Turnover, "
+        "Salary Credit, Interest Credit, Refund, Cashback, Dividend, Bonus, Incoming Transfer.\n"
         "- Convert all dates to YYYY-MM-DD.\n"
         "- amount must be a positive number.\n"
-        "- type: 'debit' for withdrawals/payments, 'credit' for deposits/receipts.\n"
+        "- type must be 'debit' for every row (you are only extracting debits).\n"
         f"- category must be exactly one of: {categories_str}.\n"
         "- Zomato/Swiggy → Food & Dining. Ola/Uber → Transportation. "
         "Jio/Airtel → Bills & Utilities. Netflix/Hotstar → Entertainment. "
-        "Salary/NEFT credit → Income. SIP/Mutual Fund → Investments & Savings.\n"
-        "- If a page has no transactions, skip it.\n"
-        "- Return [] if no transactions found."
+        "SIP/Mutual Fund → Investments & Savings.\n"
+        "- If a page has no expense transactions, skip it.\n"
+        "- Return [] if no debit transactions found."
     )
 
     client = OpenAI(api_key=api_key)
@@ -450,6 +508,11 @@ def _parse_with_vision(content: bytes) -> List[Dict]:
     from .categorizer import PREDEFINED_CATEGORIES
     for tx in transactions:
         try:
+            # Skip any credit/income rows the model may have included despite the prompt
+            tx_type = str(tx.get("type", "debit")).strip().lower()
+            if tx_type == "credit":
+                continue
+
             parsed_date = try_parse_date(str(tx.get("date", "")))
             amount = abs(float(tx.get("amount", 0)))
             if not amount:
@@ -457,6 +520,11 @@ def _parse_with_vision(content: bytes) -> List[Dict]:
             desc = str(tx.get("description", "")).strip()
             if not desc:
                 continue
+
+            # Extra safety: skip income-like descriptions
+            if _is_income_description(desc):
+                continue
+
             cat = str(tx.get("category", "")).strip()
             if cat not in PREDEFINED_CATEGORIES:
                 cat = "uncategorized"

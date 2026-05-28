@@ -15,8 +15,7 @@ const CAT_COLORS = {
   'Food & Dining': '#F59E0B', 'Transportation': '#3B82F6', 'Shopping': '#EC4899',
   'Entertainment': '#8B5CF6', 'Bills & Utilities': '#EF4444', 'Healthcare': '#10B981',
   'Travel': '#06B6D4', 'Education': '#F97316', 'Personal Care': '#D946EF',
-  'Home': '#84CC16', 'Investments & Savings': '#22C55E', 'Income': '#10B981',
-  'Transfers': '#64748B', 'Other': '#94A3B8',
+  'Home': '#84CC16', 'Transfers': '#64748B', 'Miscellaneous': '#94A3B8',
 }
 
 const FREQUENCIES = ['all', 'daily', 'weekly', 'monthly', 'yearly']
